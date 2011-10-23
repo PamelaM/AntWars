@@ -98,9 +98,7 @@ gridOddRows = [
 NO_OWNER = 0
 PLAYER_1_OWNER = 1
 PLAYER_2_OWNER = 2
-
-PLAYER_1_COLOR = (0x00, 0xE0, 0x00)
-PLAYER_2_COLOR = (0xE0, 0x00, 0x00)
+OWNER_COLORS = [(0xff, 0xff, 0xff), (0x00, 0xE0, 0x00), (0xE0, 0x00, 0x00)]
 
 
 class HexagonExample:
@@ -143,12 +141,26 @@ class HexagonExample:
         else:
             return (mapX*TILE_WIDTH,mapY*ROW_HEIGHT)
             
+    def drawHex(self, x, y):
+        # Get the top left location of the tile.
+        pixelX,pixelY = self.hexMapToPixel(x,y)
 
+        # Blit the tile to the map image.
+        self.mapimg.blit(self.tile,(pixelX,pixelY))
+
+        # Show the hexagon map location in the center of the tile.
+        hexOwner, hexVal = self.hexes[x][y]
+        color = OWNER_COLORS[hexOwner]
+        location = self.fnt.render("%d" % hexVal, 0, color)
+        lrect=location.get_rect()
+        lrect.center = (pixelX+(TILE_WIDTH/2),pixelY+(TILE_HEIGHT/2))                
+        self.mapimg.blit(location,lrect.topleft)
+        
     def drawMap(self):       
         """
         Draw the tiles.
         """
-        fnt = pygame.font.Font(pygame.font.get_default_font(),12)
+        self.fnt = pygame.font.Font(pygame.font.get_default_font(),12)
 
         self.mapimg = pygame.Surface((640,480),1)
         self.mapimg= self.mapimg.convert()
@@ -159,19 +171,7 @@ class HexagonExample:
             self.hexes.append([])
             for y in range(15):
                 self.hexes[x].append([NO_OWNER,0])
-                
-                # Get the top left location of the tile.
-                pixelX,pixelY = self.hexMapToPixel(x,y)
-
-                # Blit the tile to the map image.
-                self.mapimg.blit(self.tile,(pixelX,pixelY))
-
-                # Show the hexagon map location in the center of the tile.
-                hexOwner, hexVal = self.hexes[x][y]
-                location = fnt.render("%d" % hexVal, 0, (0xff,0xff,0xff))
-                lrect=location.get_rect()
-                lrect.center = (pixelX+(TILE_WIDTH/2),pixelY+(TILE_HEIGHT/2))                
-                self.mapimg.blit(location,lrect.topleft)
+                self.drawHex(x,y)
 
                         
     def loadTiles(self):
@@ -236,10 +236,14 @@ class HexagonExample:
                 elif event.type == MOUSEMOTION:
                     self.setCursor(event.pos[0],event.pos[1])
 
-                elif event.type == MOUSEBUTTONDOWN:
-                    self.cursor = self.player_1_tile
+                #elif event.type == MOUSEBUTTONDOWN:
+                #    self.cursor = self.player_1_tile
 
                 elif event.type == MOUSEBUTTONUP:
+                    mapX,mapY = self.pixelToHexMap(event.pos[0],event.pos[1])
+                    self.hexes[mapX][mapY][0] = PLAYER_1_OWNER
+                    self.drawHex(mapX,mapY)
+                    
                     self.cursor = self.up_cursor
                     
             # DRAWING             
