@@ -1,12 +1,13 @@
 #/usr/bin/env python
 import sys
-import os, pygame,math
+import os
+import math
+import pygame
 from pygame.locals import *
-
+from pgu import gui
 
 # TODOS:
-# Re-size the game window based on MAP_WIDTH and MAP_HEIGHT
-# Add Status windows - showing how many ants each player has in their pools
+# Add Menus
 # Add ability to save the game
 # Refactor into AntWarsGame, HexMap, Hex, Player classes
 # Add ability to choose size of ants-per-click
@@ -15,7 +16,7 @@ from pygame.locals import *
 NO_OWNER = 0
 PLAYER_1_OWNER = 1
 PLAYER_2_OWNER = 2
-OWNER_COLORS = [(0xff, 0xff, 0xff), (0x00, 0xE0, 0x00), (0xE0, 0x00, 0x00)]
+OWNER_COLORS = [(0xff, 0xff, 0xff), (0x00, 0xB0, 0x00), (0xB0, 0x00, 0x00)]
 
 
 MAP_WIDTH = 16
@@ -23,7 +24,7 @@ MAP_HEIGHT = 15
 if sys.argv[1:]:
     MAP_WIDTH, MAP_HEIGHT = map(int, sys.argv[1:])
 
-INITIAL_POOL_SIZE = 5
+INITIAL_POOL_SIZE =  (MAP_WIDTH*MAP_HEIGHT)+MAP_WIDTH
 
 # This is the rectangular size of the hexagon tiles.
 TILE_WIDTH = 38
@@ -41,7 +42,7 @@ GRID_HEIGHT = 31
 
 BORDER_SIZE = 2
 
-SIDEBAR_PIXEL_WIDTH = 80
+SIDEBAR_PIXEL_WIDTH = 100
 SIDEBAR_PIXEL_MIN_HEIGHT = 80
 
 
@@ -168,7 +169,19 @@ class HexagonExample:
             x += ODD_ROW_X_MOD
 
         return x, y
-            
+
+    def get_adjacent_hexes(self, x, y):
+        adjacent_hexes = [(x-1, y),(x+1,y)]
+        if x & 1:
+            x_offset = -1
+        else:
+            x_offset = 0
+        adjacent_hexes.append((x+x_offset, y-1))
+        adjacent_hexes.append((x+x_offset+1, y-1))
+        adjacent_hexes.append((x+x_offset, y+1))
+        adjacent_hexes.append((x+x_offset+1, y+1))
+        return [(x,y) for x,y in adjacent_hexes if x>=0 and x<MAP_WIDTH and y>=0 and y<MAP_HEIGHT]
+        
     def drawHex(self, x, y):
         # Get the top left location of the tile.
         pixelX,pixelY = self.hexMapToPixel(x,y)
@@ -186,7 +199,7 @@ class HexagonExample:
 
     def get_map_pixel_size(self):
         map_pixel_width = (MAP_WIDTH*TILE_WIDTH)+ODD_ROW_X_MOD+(BORDER_SIZE*2)
-        map_pixel_height = (MAP_HEIGHT*ROW_HEIGHT)+ODD_ROW_X_MOD+(BORDER_SIZE*2)
+        map_pixel_height = (MAP_HEIGHT*ROW_HEIGHT)+(ODD_ROW_X_MOD/2)+(BORDER_SIZE*2)
         return map_pixel_width, map_pixel_height
 
     def get_sidebar_pixel_size(self):
@@ -199,7 +212,7 @@ class HexagonExample:
         """
         Draw the tiles.
         """
-        self.fnt = pygame.font.Font(pygame.font.get_default_font(),12)
+        self.fnt = pygame.font.SysFont("Times",12, bold=True)
 
         map_pixel_width, map_pixel_height = self.get_map_pixel_size()
         self.mapimg = pygame.Surface((map_pixel_width,map_pixel_height),1).convert()
@@ -285,7 +298,7 @@ class HexagonExample:
         sidebar_pixel_width, sidebar_pixel_height = self.get_sidebar_pixel_size()
         
         self.screen = pygame.display.set_mode((map_pixel_width+sidebar_pixel_width, max(map_pixel_height, sidebar_pixel_height)),1)
-        pygame.display.set_caption('Press SPACE to toggle the gridRect display')
+        pygame.display.set_caption('Ant Wars')
         self.cursor_visible = False    
         self.loadTiles()
         self.drawMap()        
@@ -328,7 +341,7 @@ class HexagonExample:
         Set the hexagon map cursor.
         """
         mapX,mapY = self.pixelToHexMap(x,y)
-        self.cursor_visible = mapX<MAP_WIDTH and mapY<MAP_HEIGHT   
+        self.cursor_visible = mapX in range(MAP_WIDTH) and mapY in range(MAP_HEIGHT)
         pixelX,pixelY = self.hexMapToPixel(mapX,mapY)        
         self.cursorPos.topleft = (pixelX,pixelY)
 
@@ -386,7 +399,80 @@ class HexagonExample:
                self.player_info[PLAYER_1_OWNER]['pool']!=0:
                 self.current_player = PLAYER_1_OWNER        
                 self.logTransitionAction("CHANGE PLAYER to %s" % self.current_player)
+
+    def handlePlayingClick(self, mapX, mapY):        
+        if self.hexes[mapX][mapY][0]==self.current_player:
+            self.logClickAction("NOT OTHER PLAYER OWNED")
+            return
+
+        target_points = self.hexes[mapX][mapY][1]
+        attack_points = 0
+        for x, y in self.get_adjacent_hexes(mapX, mapY):
+            if self.hexes[x][y][0]==self.current_player and \
+               self.hexes[x][y][1]>1:
+                attack_points += self.hexes[x][y][1]-1
+                self.hexes[x][y][1] = 1
+                self.drawHex(x,y)
+        
+
+        if target_points>attack_points:
+            self.hexes[mapX][mapY][1] = target_points-attack_points
+            result = "Defender wins"
+        elif target_points==attack_points:            
+            self.hexes[mapX][mapY][1] = 1
+            result = "Defender ties"
+        else:
+            self.hexes[mapX][mapY][1] = attack_points-target_points
+            self.hexes[mapX][mapY][0] = self.current_player
+            result = "Attacker wins"
                 
+        self.drawHex(mapX, mapY)
+        self.logClickAction("%s -> %s, %s" % (attack_points, target_points, result))
+        
+        if self.current_player==PLAYER_1_OWNER:
+            self.current_player = PLAYER_2_OWNER
+            self.logTransitionAction("CHANGE PLAYER to %s" % self.current_player)
+        elif self.current_player==PLAYER_2_OWNER:
+            self.current_player = PLAYER_1_OWNER        
+            self.logTransitionAction("CHANGE PLAYER to %s" % self.current_player)
+
+    def handle_map_mouse_event(self, px, py, event_type):
+        if event_type == MOUSEMOTION:
+            self.setCursor(px, py)
+
+        elif event_type == MOUSEBUTTONDOWN:
+            self.mouse_down_location = self.pixelToHexMap(px, py)
+
+        elif event_type == MOUSEBUTTONUP:
+            mapX,mapY = mouse_up_location = self.pixelToHexMap(px, py)
+            
+            if mapX>=MAP_WIDTH or mapY>=MAP_HEIGHT:   
+                self.logClickAction("OUT-OF-AREA")
+
+            elif self.game_state=='CHOOSING':
+                self.handleChoosingClick(mapX, mapY)
+                    
+            elif self.game_state=='PLACING':
+                self.handlePlacingClick(mapX, mapY)
+
+            elif self.game_state=='PLAYING':
+                self.handlePlayingClick(mapX, mapY)
+            
+            else:
+                self.logClickAction("UNKNOWN STATE")
+            
+
+            self.logClick(mapX, mapY)
+            self.cursor = self.up_cursor
+            self.update_sidebar()
+    
+    def handle_sidebar_mouse_event(self, px, py, event_type):
+        if event_type == MOUSEMOTION:
+            self.setCursor(px, py)
+            
+        elif event_type==MOUSEBUTTONUP:
+            self.update_sidebar()
+    
     def mainLoop(self):    
         pygame.init()    
 
@@ -403,36 +489,13 @@ class HexagonExample:
                 elif event.type == KEYDOWN:
                     if event.key == K_ESCAPE:
                         return                
-                
-                elif event.type == MOUSEMOTION:
-                    self.setCursor(event.pos[0],event.pos[1])
-
-                elif event.type == MOUSEBUTTONDOWN:
-                    self.mouse_down_location = self.pixelToHexMap(event.pos[0],event.pos[1])
-
-                elif event.type == MOUSEBUTTONUP:
-                    mapX,mapY = mouse_up_location = self.pixelToHexMap(event.pos[0],event.pos[1])
-                    
-                    if mapX>=MAP_WIDTH or mapY>=MAP_HEIGHT:   
-                        self.logClickAction("OUT-OF-AREA")
-
-                    elif self.game_state=='CHOOSING':
-                        self.handleChoosingClick(mapX, mapY)
-                            
-                    elif self.game_state=='PLACING':
-                        self.handlePlacingClick(mapX, mapY)
-
-                    elif self.game_state=='PLAYING':
-                        self.logClickAction("NO-PLAYING-YET")
-                    
+                elif event.type in (MOUSEMOTION, MOUSEBUTTONUP, MOUSEBUTTONDOWN):
+                    px, py = event.pos[0],event.pos[1]
+                    if px<self.sidebar_x_location:
+                        self.handle_map_mouse_event(px, py, event.type)
                     else:
-                        self.logClickAction("UNKNOWN STATE")
-                    
-
-                    self.logClick(mapX, mapY)
-                    self.cursor = self.up_cursor
-                    self.update_sidebar()
-                    
+                        self.handle_sidebar_mouse_event(px, py, event.type)                    
+                        
             # DRAWING             
             self.screen.blit(self.mapimg, (0, 0))
             if self.cursor_visible:
