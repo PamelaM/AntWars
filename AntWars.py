@@ -145,6 +145,7 @@ gridOddRows = [
 class AntWarsGame(object):
     def __init__(self):
         self.state = "CHOOSING"
+        self.turn = 0
         self.is_over = False
         self.current_player = player_one
         self.changed_hexes = []
@@ -234,6 +235,7 @@ class AntWarsGame(object):
 
         if player_one.pool==0 and player_two.pool==0:
             self.state = "PLAYING"
+            self.turn = 1
             self.current_player = self.current_player.other_player
             self.logTransitionAction("START PLAYING")
         else:
@@ -297,6 +299,8 @@ class AntWarsGame(object):
                 hexes = self.get_hexes_owned_by(self.current_player)
                 safe_hexes = self.get_safe_hexes(hexes)
                 self.current_player.pool = (MAP_WIDTH*MAP_HEIGHT)+len(safe_hexes)
+                if self.current_player == player_one:
+                    self.turn += 1
             self.logTransitionAction("CHANGE PLAYER to %s" % self.current_player.id)
         else:
             self.logTransitionAction("CAN'T CHANGE PLAYER to %s" % self.current_player.id)
@@ -531,7 +535,11 @@ class HexagonExample:
         self.sidebarimg.fill((234,234,234))
 
         # game_state
-        location = self.fnt.render(self.game.state, 0, (0,0,0))
+        if self.game.state == 'PLAYING':
+            state_str = "PLAYING  %3s" % (self.game.turn)
+        else:
+            state_str = self.game.state
+        location = self.fnt.render(state_str, 0, (0,0,0))
         self.sidebarimg.blit(location,(2,2))
 
         # current player
