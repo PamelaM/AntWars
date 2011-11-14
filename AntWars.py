@@ -22,7 +22,14 @@ class Player(object):
         self.color = color
         self.pool = 0
         self.other_player = None
-    
+
+class Hex(object):
+    def __init__(self, x, y, owner, count):
+        self.x = x
+        self.y = y
+        self.owner = owner
+        self.count = count
+        
 none_player = Player(0, False, (0xff, 0xff, 0xff))
 player_one = Player(1, is_computer="C1" in sys.argv[1:], color=(0x00, 0xB0, 0x00))
 player_two = Player(2, is_computer="C2" in sys.argv[1:] or "C" in sys.argv[1:], color=(0xB0, 0x00, 0x00))
@@ -152,8 +159,9 @@ class AntWarsGame(object):
         for x in range(MAP_WIDTH):
             self.hexes.append([])
             for y in range(MAP_HEIGHT):
-                self.hexes[x].append([none_player,0])
-                self.changed_hexes.append((x,y))
+                h = Hex(x,y,none_player,0)
+                self.hexes[x].append(h)
+                self.changed_hexes.append(h)
 
 
     def handleClick(self, mapX, mapY):
@@ -180,20 +188,23 @@ class AntWarsGame(object):
         
     def handleChoosingClick(self, mapX, mapY):
 
-        if self.hexes[mapX][mapY][0]!=none_player:
+        h = self.hexes[mapX][mapY]
+        
+        if h.owner!=none_player:
             self.logClickAction("ALREADY OWNED")
             return
             
         self.logClickAction("NEW OWNER")
-            
-        self.hexes[mapX][mapY][0] = self.current_player
-        self.hexes[mapX][mapY][1] = 1
-        self.changed_hexes.append((mapX, mapY))
+
+                    
+        h.owner = self.current_player
+        h.count = 1
+        self.changed_hexes.append(h)
         
         num_not_owned = 0
         for row in self.hexes:
             for hex in row:
-                if hex[0]==none_player:
+                if hex.owner==none_player:
                     num_not_owned += 1
 
 
@@ -206,19 +217,20 @@ class AntWarsGame(object):
             self.change_player()
             
 
-    def load_hex(self, mapX, mapY):
-        self.hexes[mapX][mapY][1] += 1
-        self.changed_hexes.append((mapX, mapY))
-        self.logClickAction("Bump Hex to %s" % self.hexes[mapX][mapY][1])
+    def load_hex(self, hex):
+        hex.count += 1
+        self.changed_hexes.append(hex)
+        self.logClickAction("Bump Hex to %s" % hex.count)
         self.current_player.pool -= 1
         self.logClickAction("Reduce pool to %s" % self.current_player.pool)
     
     def handlePlacingClick(self, mapX, mapY):
-        if self.hexes[mapX][mapY][0]!=self.current_player:
+        hex = self.hexes[mapX][mapY]
+        if hex.owner!=self.current_player:
             self.logClickAction("OTHER PLAYER OWNED")
             return
 
-        self.load_hex(mapX, mapY)        
+        self.load_hex(hex)        
 
         if player_one.pool==0 and player_two.pool==0:
             self.state = "PLAYING"
@@ -227,38 +239,38 @@ class AntWarsGame(object):
         else:
             self.change_player()
 
-    def get_attack_points(self, mapX, mapY, actual_attack=False):
+    def get_attack_points(self, hex, actual_attack=False):
         attack_points = 0
-        for x, y in self.get_adjacent_hexes(mapX, mapY):
-            if self.hexes[x][y][0]==self.current_player and \
-               self.hexes[x][y][1]>1:
-                attack_points += self.hexes[x][y][1]-1
+        for h in self.get_adjacent_hexes(hex):
+            if h.owner==self.current_player and h.count>1:
+                attack_points += h.count-1
                 if actual_attack:
-                    self.hexes[x][y][1] = 1
-                    self.changed_hexes.append((x,y))
+                    h.count = 1
+                    self.changed_hexes.append(h)
         return attack_points
         
     def handlePlayingClick(self, mapX, mapY):        
-        if self.hexes[mapX][mapY][0]==self.current_player:
+        hex = self.hexes[mapX][mapY]
+        if hex.owner==self.current_player:
             self.logClickAction("NOT OTHER PLAYER OWNED")
             return
 
-        target_points = self.hexes[mapX][mapY][1]
-        attack_points = self.get_attack_points(mapX, mapY, actual_attack=True)
+        target_points = hex.count
+        attack_points = self.get_attack_points(hex, actual_attack=True)
         
 
         if target_points>attack_points:
-            self.hexes[mapX][mapY][1] = target_points-attack_points
+            hex.count = target_points-attack_points
             result = "Defender wins"
         elif target_points==attack_points:            
-            self.hexes[mapX][mapY][1] = 1
+            hex.count = 1
             result = "Defender ties"
         else:
-            self.hexes[mapX][mapY][1] = attack_points-target_points
-            self.hexes[mapX][mapY][0] = self.current_player
+            hex.count = attack_points-target_points
+            hex.owner = self.current_player
             result = "Attacker wins"
                 
-        self.changed_hexes.append((mapX, mapY))
+        self.changed_hexes.append(hex)
         self.logClickAction("%s -> %s, %s" % (attack_points, target_points, result))
         
         self.change_player()
@@ -271,8 +283,7 @@ class AntWarsGame(object):
         return safe_hexes
         
     def is_safe_hex(self, h, hexes):
-        x, y = h
-        for a in self.get_adjacent_hexes(x, y):
+        for a in self.get_adjacent_hexes(h):
             if not a in hexes:
                 return False
         return True
@@ -315,17 +326,18 @@ class AntWarsGame(object):
             self.winner = player_one
             self.is_over = True
 
-    def get_adjacent_hexes(self, x, y):
-        adjacent_hexes = [(x-1, y),(x+1,y)]
+    def get_adjacent_hexes(self, hex):
+        x, y = hex.x, hex.y
+        adjacent_coords = [(x-1, y),(x+1,y)]
         if x & 1:
             x_offset = -1
         else:
             x_offset = 0
-        adjacent_hexes.append((x+x_offset, y-1))
-        adjacent_hexes.append((x+x_offset+1, y-1))
-        adjacent_hexes.append((x+x_offset, y+1))
-        adjacent_hexes.append((x+x_offset+1, y+1))
-        return [(x,y) for x,y in adjacent_hexes if x>=0 and x<MAP_WIDTH and y>=0 and y<MAP_HEIGHT]
+        adjacent_coords.append((x+x_offset, y-1))
+        adjacent_coords.append((x+x_offset+1, y-1))
+        adjacent_coords.append((x+x_offset, y+1))
+        adjacent_coords.append((x+x_offset+1, y+1))
+        return [self.hexes[x][y] for x,y in adjacent_coords if x>=0 and x<MAP_WIDTH and y>=0 and y<MAP_HEIGHT]
 
     # ---- Logging stuff....    
     def init_logging(self):
@@ -343,14 +355,14 @@ class AntWarsGame(object):
     def logTransitionAction(self, action):
         self.transition_actions.append(action)
         
-    def logClick(self, x, y):
+    def logClick(self, hex):
         self.click_num += 1
         click_num = self.click_num
         start_state = self.click_state
         start_pid = self.click_player.id
         curr_state = self.state
         curr_pid = self.current_player.id
-        xy = "(%s,%s)" % (x, y)
+        xy = "(%s,%s)" % (hex.x, hex.y)
         elapsed = time.time()-self.log_start_time
         click_actions = ", ".join(self.click_actions)
         transition_actions = ", ".join(self.transition_actions)
@@ -367,11 +379,10 @@ class AntWarsGame(object):
     
     def get_hexes_owned_by(self, owner):
         hexes = []
-        
-        for x in range(MAP_WIDTH):
-            for y in range(MAP_HEIGHT):
-                if self.hexes[x][y][0]==owner:
-                    hexes.append((x,y))
+        for row in self.hexes:
+            for h in row:
+                if h.owner==owner:
+                    hexes.append(h)
         return hexes
         
     def play_computer_turn(self):
@@ -386,38 +397,38 @@ class AntWarsGame(object):
     
     def play_computer_choosing(self):
         avail_hexes = self.get_hexes_owned_by(none_player)
-        x,y = random.choice(avail_hexes)
-        self.handleChoosingClick(x,y)                
-        self.logClick(x, y)
+        h = random.choice(avail_hexes)
+        self.handleChoosingClick(h.x,h.y)                
+        self.logClick(h)
 
     def play_computer_placing(self):
         avail_hexes = self.get_hexes_owned_by(self.current_player)
-        x,y = random.choice(avail_hexes)
-        self.handlePlacingClick(x,y)                
-        self.logClick(x, y)
+        h = random.choice(avail_hexes)
+        self.handlePlacingClick(h.x,h.y)                
+        self.logClick(h)
 
     def play_computer_playing(self):
         if self.current_player.pool:
             my_hexes = self.get_hexes_owned_by(self.current_player)
             safe_hexes = self.get_safe_hexes(my_hexes)
-            reinforcing_hexes = [[self.hexes[x][y][1], (x,y)] for x,y in my_hexes if not (x,y) in safe_hexes]
+            reinforcing_hexes = [[h.count, h] for h in my_hexes if not h in safe_hexes]
             reinforcing_hexes.sort()
-            x,y = reinforcing_hexes[0][1]
-            self.load_hex(x,y)
+            h = reinforcing_hexes[0][1]
+            self.load_hex(h)
         else:            
             # Get opposing hexes...
             target_hexes = self.get_hexes_owned_by(self.current_player.other_player)
-            # Determine # attack points can be brought to bear
-            target_hexes = [[self.get_attack_points(x,y), (x,y)] for x,y in target_hexes]
+            # Determine # points more than target hex
+            target_hexes = [[self.get_attack_points(h)-h.count, h] for h in target_hexes]
             target_hexes.sort()
-            if target_hexes[-1][0]:
-                x,y = target_hexes[-1][1]
-                self.handlePlayingClick(x, y)
+            if target_hexes[-1][0]>0:
+                h = target_hexes[-1][1]
+                self.handlePlayingClick(h.x, h.y)
             else:
                 self.logClickAction("NO ATTACKS AVAILABLE")
                 self.change_player()
                 
-        self.logClick(x, y)
+        self.logClick(h)
             
         
 class HexagonExample:
@@ -466,16 +477,15 @@ class HexagonExample:
         return x, y
 
         
-    def drawHex(self, x, y):
+    def drawHex(self, hex):
         # Get the top left location of the tile.
-        pixelX,pixelY = self.hexMapToPixel(x,y)
+        pixelX,pixelY = self.hexMapToPixel(hex.x,hex.y)
 
         # Blit the tile to the map image.
         self.mapimg.blit(self.tile,(pixelX,pixelY))
 
         # Show the hexagon map location in the center of the tile.
-        hexOwner, hexVal = self.game.hexes[x][y]
-        location = self.fnt.render("%d" % hexVal, 0, hexOwner.color)
+        location = self.fnt.render("%d" % hex.count, 0, hex.owner.color)
         lrect=location.get_rect()
         lrect.center = (pixelX+(TILE_WIDTH/2),pixelY+(TILE_HEIGHT/2))                
         self.mapimg.blit(location,lrect.topleft)
@@ -504,8 +514,8 @@ class HexagonExample:
     
     def draw_changed_hexes(self):
         while self.game.changed_hexes:
-            x,y = self.game.changed_hexes.pop(0)            
-            self.drawHex(x,y)
+            h = self.game.changed_hexes.pop(0)            
+            self.drawHex(h)
             
 
     def drawSidebar(self):       
@@ -614,7 +624,7 @@ class HexagonExample:
 
             self.game.play_computer_turn()
 
-            clock.tick(10)
+            clock.tick(30)
 
             for event in pygame.event.get():
                 if event.type == QUIT:
