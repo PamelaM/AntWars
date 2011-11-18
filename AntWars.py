@@ -11,9 +11,11 @@ from pgu import gui
 # TODOS:
 # Add Menus
 # Add ability to save the game
-# Refactor into AntWarsGame, HexMap, Hex, Player classes
 # Add ability to choose size of ants-per-click
-# Add ComputerPlayer class
+# Refactor Player into Human Player and ComputerPlayer classes
+# Parse options properly
+# High Scores
+# Network play
 
 class Player(object):
     def __init__(self, id, is_computer, color):
@@ -21,7 +23,19 @@ class Player(object):
         self.is_computer = is_computer
         self.color = color
         self.pool = 0
+        self.batch_size = 1
         self.other_player = None
+
+
+class HumanPlayer(Player):
+    def __init__(self, id, color):
+        Player.__init__(self, id, is_computer=False, color=color)
+
+class ComputerPlayer(Player):
+    def __init__(self, id, color):
+        Player.__init__(self, id, is_computer=True, color=color)
+    
+PLAYER_CLASSES = {True:ComputerPlayer, False:HumanPlayer}
 
 class Hex(object):
     def __init__(self, x, y, owner, count):
@@ -31,8 +45,8 @@ class Hex(object):
         self.count = count
         
 none_player = Player(0, False, (0xff, 0xff, 0xff))
-player_one = Player(1, is_computer="C1" in sys.argv[1:], color=(0x00, 0xB0, 0x00))
-player_two = Player(2, is_computer="C2" in sys.argv[1:] or "C" in sys.argv[1:], color=(0xB0, 0x00, 0x00))
+player_one = PLAYER_CLASSES["C1" in sys.argv[1:]](1, color=(0x00, 0xB0, 0x00))
+player_two = PLAYER_CLASSES["C2" in sys.argv[1:] or "C" in sys.argv[1:]](2, color=(0xB0, 0x00, 0x00))
 player_one.other_player = player_two
 player_two.other_player = player_one
 
@@ -43,6 +57,10 @@ if args:
     MAP_WIDTH, MAP_HEIGHT = map(int, args)
 
 INITIAL_POOL_SIZE =  (MAP_WIDTH*MAP_HEIGHT)+MAP_WIDTH
+INITIAL_PLACING_BATCH_SIZE = 2
+INITIAL_PLAYING_BATCH_SIZE = 500
+MIN_PER_TURN_BATCH_SIZE = 5
+NUM_ATTACKS_PER_TURN = 3
 
 # This is the rectangular size of the hexagon tiles.
 TILE_WIDTH = 38
@@ -64,83 +82,6 @@ SIDEBAR_PIXEL_WIDTH = 100
 SIDEBAR_PIXEL_MIN_HEIGHT = 80
 
 
-# This is the modification tables for the square grid.
-
-a1=(-1,-1)
-b1=(0,0)
-c1=(0,-1)
-
-gridEvenRows = [
-[a1,a1,a1,a1,a1,a1,a1,a1,a1,a1,a1,a1,a1,a1,a1,a1,a1,a1,b1,b1,c1,c1,c1,c1,c1,c1,c1,c1,c1,c1,c1,c1,c1,c1,c1,c1,c1,c1],
-[a1,a1,a1,a1,a1,a1,a1,a1,a1,a1,a1,a1,a1,a1,a1,a1,b1,b1,b1,b1,b1,b1,c1,c1,c1,c1,c1,c1,c1,c1,c1,c1,c1,c1,c1,c1,c1,c1],
-[a1,a1,a1,a1,a1,a1,a1,a1,a1,a1,a1,a1,a1,a1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,c1,c1,c1,c1,c1,c1,c1,c1,c1,c1,c1,c1,c1,c1],
-[a1,a1,a1,a1,a1,a1,a1,a1,a1,a1,a1,a1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,c1,c1,c1,c1,c1,c1,c1,c1,c1,c1,c1,c1],
-[a1,a1,a1,a1,a1,a1,a1,a1,a1,a1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,c1,c1,c1,c1,c1,c1,c1,c1,c1,c1],
-[a1,a1,a1,a1,a1,a1,a1,a1,a1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,c1,c1,c1,c1,c1,c1,c1,c1,c1],
-[a1,a1,a1,a1,a1,a1,a1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,c1,c1,c1,c1,c1,c1,c1],
-[a1,a1,a1,a1,a1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,c1,c1,c1,c1,c1],
-[a1,a1,a1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,c1,c1,c1],
-[a1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,c1],
-[b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1],
-[b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1],
-[b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1],
-[b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1],
-[b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1],
-[b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1],
-[b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1],
-[b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1],
-[b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1],
-[b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1],
-[b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1],
-[b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1],
-[b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1],
-[b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1],
-[b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1],
-[b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1],
-[b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1],
-[b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1],
-[b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1],
-[b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1],
-[b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1]
-]
-
-a2=(-1,0)
-b2=(0,-1)
-c2=(0,0)
-
-gridOddRows = [
-[a2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,c2],
-[a2,a2,a2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,c2,c2,c2],
-[a2,a2,a2,a2,a2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,c2,c2,c2,c2,c2],
-[a2,a2,a2,a2,a2,a2,a2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,c2,c2,c2,c2,c2,c2,c2],
-[a2,a2,a2,a2,a2,a2,a2,a2,a2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,c2,c2,c2,c2,c2,c2,c2,c2,c2],
-[a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2],
-[a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2],
-[a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2],
-[a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,b2,b2,b2,b2,b2,b2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2],
-[a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,b2,b2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2],
-[a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2],
-[a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2],
-[a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2],
-[a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2],
-[a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2],
-[a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2],
-[a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2],
-[a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2],
-[a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2],
-[a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2],
-[a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2],
-[a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2],
-[a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2],
-[a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2],
-[a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2],
-[a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2],
-[a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2],
-[a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2],
-[a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2],
-[a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2],
-[a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2]
-]
 
 class AntWarsGame(object):
     def __init__(self):
@@ -148,6 +89,11 @@ class AntWarsGame(object):
         self.turn = 0
         self.is_over = False
         self.current_player = player_one
+        if player_one.is_computer and player_two.is_computer:
+            self.frame_rate = 60
+        else:
+            self.frame_rate = 10
+        
         self.changed_hexes = []
         self.init_hexes()
         
@@ -185,7 +131,7 @@ class AntWarsGame(object):
             self.logClickAction("UNKNOWN STATE")
         
 
-        self.logClick(mapX, mapY)
+        self.logClick(self.hexes[mapX][mapY])
         
     def handleChoosingClick(self, mapX, mapY):
 
@@ -213,17 +159,27 @@ class AntWarsGame(object):
             self.state = "PLACING"
             self.current_player = self.current_player.other_player
             player_one.pool = player_two.pool = INITIAL_POOL_SIZE
+            player_one.batch_size = player_two.batch_size = INITIAL_PLACING_BATCH_SIZE
             self.logTransitionAction("START PLACING")
         else:
             self.change_player()
             
 
+    def load_hex_amount(self, hex):
+        n = max(0, min(self.current_player.pool, self.current_player.batch_size, 25, 99-hex.count))
+        return n
+        
     def load_hex(self, hex):
-        hex.count += 1
-        self.changed_hexes.append(hex)
-        self.logClickAction("Bump Hex to %s" % hex.count)
-        self.current_player.pool -= 1
-        self.logClickAction("Reduce pool to %s" % self.current_player.pool)
+        n = self.load_hex_amount(hex)
+        
+        if not n:
+            return False            
+        else:
+            hex.count += n
+            self.changed_hexes.append(hex)
+            self.logClickAction("Bump Hex to %s" % hex.count)
+            self.current_player.pool -= n
+            self.logClickAction("Reduce pool to %s" % self.current_player.pool)
     
     def handlePlacingClick(self, mapX, mapY):
         hex = self.hexes[mapX][mapY]
@@ -236,7 +192,13 @@ class AntWarsGame(object):
         if player_one.pool==0 and player_two.pool==0:
             self.state = "PLAYING"
             self.turn = 1
+            self.num_attacks = NUM_ATTACKS_PER_TURN
+            if player_one.is_computer and player_two.is_computer:
+                self.frame_rate = 40
+            else:
+                self.frame_rate = 10
             self.current_player = self.current_player.other_player
+            player_one.batch_size = player_two.batch_size = INITIAL_PLAYING_BATCH_SIZE            
             self.logTransitionAction("START PLAYING")
         else:
             self.change_player()
@@ -245,9 +207,13 @@ class AntWarsGame(object):
         attack_points = 0
         for h in self.get_adjacent_hexes(hex):
             if h.owner==self.current_player and h.count>1:
-                attack_points += h.count-1
+                # TODO: change rules on attack points:
+                #   ? 1/2 if wouldn't be safe
+                #   ? All but one if would be?
+                n = min(h.count/2, self.current_player.batch_size)
+                attack_points += n
                 if actual_attack:
-                    h.count = 1
+                    h.count -= n
                     self.changed_hexes.append(h)
         return attack_points
         
@@ -274,8 +240,13 @@ class AntWarsGame(object):
                 
         self.changed_hexes.append(hex)
         self.logClickAction("%s -> %s, %s" % (attack_points, target_points, result))
-        
-        self.change_player()
+        self.num_attacks -= 1            
+        if self.num_attacks<=1:
+            self.logClickAction("USED ALL ATTACKS")
+            self.change_player()
+        else:
+            self.logClickAction("%s ATTACKS LEFT" % self.num_attacks)
+                
 
     def get_safe_hexes(self, hexes):
         safe_hexes = []
@@ -295,13 +266,17 @@ class AntWarsGame(object):
 
         if self.can_change_to_player(next_player):
             self.current_player = next_player
+            self.logTransitionAction("CHANGE PLAYER to %s" % self.current_player.id)
             if self.state=='PLAYING':
+                self.num_attacks = NUM_ATTACKS_PER_TURN
                 hexes = self.get_hexes_owned_by(self.current_player)
                 safe_hexes = self.get_safe_hexes(hexes)
-                self.current_player.pool = (MAP_WIDTH*MAP_HEIGHT)+len(safe_hexes)
+                n = max(MIN_PER_TURN_BATCH_SIZE, len(hexes)+(len(safe_hexes)*2))
+                self.current_player.pool = n
+                self.logTransitionAction("Add %s TO POOL" % n)
                 if self.current_player == player_one:
-                    self.turn += 1
-            self.logTransitionAction("CHANGE PLAYER to %s" % self.current_player.id)
+                    self.turn += 1                    
+                    self.logTransitionAction("START TURN %s" % self.turn)
         else:
             self.logTransitionAction("CAN'T CHANGE PLAYER to %s" % self.current_player.id)
         
@@ -401,39 +376,158 @@ class AntWarsGame(object):
     
     def play_computer_choosing(self):
         avail_hexes = self.get_hexes_owned_by(none_player)
-        h = random.choice(avail_hexes)
+        my_hexes = self.get_hexes_owned_by(self.current_player)
+        if len(my_hexes)<4 or len(avail_hexes)==1:
+            target_hexes = avail_hexes
+        else:
+            their_hexes = self.get_hexes_owned_by(self.current_player.other_player)
+    
+            target_hexes = []
+            for h in avail_hexes:
+                adj = self.get_adjacent_hexes(h)
+                n = len([a for a in adj if a in my_hexes])
+                target_hexes.append([n, h])
+    
+            target_hexes.sort()
+            target_hexes.reverse()
+            target_hexes = [h for n,h in target_hexes]
+            num_targets = len(target_hexes)
+            quarter_targets = num_targets/4
+            target_hexes = target_hexes[:1+quarter_targets]
+        
+        h = random.choice(target_hexes)
         self.handleChoosingClick(h.x,h.y)                
         self.logClick(h)
 
     def play_computer_placing(self):
         avail_hexes = self.get_hexes_owned_by(self.current_player)
+        safe_hexes = self.get_safe_hexes(avail_hexes)
+        avail_hexes = [h for h in avail_hexes if not h in safe_hexes]
         h = random.choice(avail_hexes)
         self.handlePlacingClick(h.x,h.y)                
         self.logClick(h)
 
     def play_computer_playing(self):
+        my_hexes = self.get_hexes_owned_by(self.current_player)
         if self.current_player.pool:
-            my_hexes = self.get_hexes_owned_by(self.current_player)
             safe_hexes = self.get_safe_hexes(my_hexes)
-            reinforcing_hexes = [[h.count, h] for h in my_hexes if not h in safe_hexes]
+            reinforcing_hexes = [[h in safe_hexes, h.count, h] for h in my_hexes]
             reinforcing_hexes.sort()
-            h = reinforcing_hexes[0][1]
-            self.load_hex(h)
+            reinforcing_hexes = [h for s,c,h in reinforcing_hexes if self.load_hex_amount(h)]
+                        
+            if not reinforcing_hexes:
+                self.logClickAction("NO REINFORCEMENTS AVAILABLE")
+                self.current_player.pool = 0
+            else:
+                h = random.choice(reinforcing_hexes[:3])
+                self.load_hex(h)
+                
         else:            
             # Get opposing hexes...
-            target_hexes = self.get_hexes_owned_by(self.current_player.other_player)
-            # Determine # points more than target hex
-            target_hexes = [[self.get_attack_points(h)-h.count, h] for h in target_hexes]
+            target_hexes = []
+            their_hexes = self.get_hexes_owned_by(self.current_player.other_player)
+            
+            for h in their_hexes:
+                attack_points = self.get_attack_points(h)
+                if attack_points:
+                    adjacent_hexes = self.get_adjacent_hexes(h)
+                    surroundedness = len([a for a in adjacent_hexes if a in my_hexes])
+                    defendedness = len([a for a in adjacent_hexes if a in their_hexes])
+                    successfull = attack_points>h.count
+                    target_hexes.append([successfull, surroundedness, 6-defendedness, attack_points, h])
+                
             target_hexes.sort()
-            if target_hexes[-1][0]>0:
-                h = target_hexes[-1][1]
+            target_hexes.reverse()
+            if target_hexes:
+            
+                #target_hexes = target_hexes[:3]
+                #h = random.choice(target_hexes)
+                h = target_hexes[0][-1]
                 self.handlePlayingClick(h.x, h.y)
             else:
-                self.logClickAction("NO ATTACKS AVAILABLE")
+                self.logClickAction("NO ATTACKS AVAILABLE")                
                 self.change_player()
                 
         self.logClick(h)
             
+
+# This is the modification tables for the square grid.
+
+a1=(-1,-1)
+b1=(0,0)
+c1=(0,-1)
+
+gridEvenRows = [
+[a1,a1,a1,a1,a1,a1,a1,a1,a1,a1,a1,a1,a1,a1,a1,a1,a1,a1,b1,b1,c1,c1,c1,c1,c1,c1,c1,c1,c1,c1,c1,c1,c1,c1,c1,c1,c1,c1],
+[a1,a1,a1,a1,a1,a1,a1,a1,a1,a1,a1,a1,a1,a1,a1,a1,b1,b1,b1,b1,b1,b1,c1,c1,c1,c1,c1,c1,c1,c1,c1,c1,c1,c1,c1,c1,c1,c1],
+[a1,a1,a1,a1,a1,a1,a1,a1,a1,a1,a1,a1,a1,a1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,c1,c1,c1,c1,c1,c1,c1,c1,c1,c1,c1,c1,c1,c1],
+[a1,a1,a1,a1,a1,a1,a1,a1,a1,a1,a1,a1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,c1,c1,c1,c1,c1,c1,c1,c1,c1,c1,c1,c1],
+[a1,a1,a1,a1,a1,a1,a1,a1,a1,a1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,c1,c1,c1,c1,c1,c1,c1,c1,c1,c1],
+[a1,a1,a1,a1,a1,a1,a1,a1,a1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,c1,c1,c1,c1,c1,c1,c1,c1,c1],
+[a1,a1,a1,a1,a1,a1,a1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,c1,c1,c1,c1,c1,c1,c1],
+[a1,a1,a1,a1,a1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,c1,c1,c1,c1,c1],
+[a1,a1,a1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,c1,c1,c1],
+[a1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,c1],
+[b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1],
+[b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1],
+[b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1],
+[b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1],
+[b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1],
+[b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1],
+[b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1],
+[b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1],
+[b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1],
+[b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1],
+[b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1],
+[b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1],
+[b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1],
+[b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1],
+[b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1],
+[b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1],
+[b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1],
+[b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1],
+[b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1],
+[b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1],
+[b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1,b1]
+]
+
+a2=(-1,0)
+b2=(0,-1)
+c2=(0,0)
+
+gridOddRows = [
+[a2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,c2],
+[a2,a2,a2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,c2,c2,c2],
+[a2,a2,a2,a2,a2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,c2,c2,c2,c2,c2],
+[a2,a2,a2,a2,a2,a2,a2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,c2,c2,c2,c2,c2,c2,c2],
+[a2,a2,a2,a2,a2,a2,a2,a2,a2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,c2,c2,c2,c2,c2,c2,c2,c2,c2],
+[a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2],
+[a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2],
+[a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,b2,b2,b2,b2,b2,b2,b2,b2,b2,b2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2],
+[a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,b2,b2,b2,b2,b2,b2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2],
+[a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,b2,b2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2],
+[a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2],
+[a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2],
+[a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2],
+[a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2],
+[a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2],
+[a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2],
+[a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2],
+[a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2],
+[a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2],
+[a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2],
+[a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2],
+[a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2],
+[a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2],
+[a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2],
+[a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2],
+[a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2],
+[a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2],
+[a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2],
+[a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2],
+[a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2],
+[a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,a2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2,c2]
+]
         
 class HexagonExample:
 
@@ -441,6 +535,8 @@ class HexagonExample:
         """
         Converts a pixel location to a location on the hexagon map.
         """        
+        ox, oy = x,y
+        
         # Grid-math is topleft 0,0 based, so remove the border offset
         x -= BORDER_SIZE
         y -= BORDER_SIZE
@@ -466,6 +562,7 @@ class HexagonExample:
             hexMapX=gridX+gridEvenRows[gridPixelY][gridPixelX][0]
             hexMapY=gridY+gridEvenRows[gridPixelY][gridPixelX][1]
 
+        print ox, x, gridX, gridPixelX, hexMapX, ':', oy, y, gridY, gridPixelY, hexMapY;sys.stdout.flush()
         return (hexMapX,hexMapY)
 
     def hexMapToPixel(self,mapX,mapY):
@@ -547,11 +644,11 @@ class HexagonExample:
         self.sidebarimg.blit(location,(2,20))
 
         # player 1 pool size
-        location = self.fnt.render("Pool: %4s" % player_one.pool, 0, player_one.color)
+        location = self.fnt.render("Pool: %4s [%2s]" % (player_one.pool, len(self.game.get_hexes_owned_by(player_one))), 0, player_one.color)
         self.sidebarimg.blit(location,(2,40))
 
         # player 2 pool size
-        location = self.fnt.render("Pool: %4s" % player_two.pool, 0, player_two.color)
+        location = self.fnt.render("Pool: %4s [%2s]" % (player_two.pool, len(self.game.get_hexes_owned_by(player_two))), 0, player_two.color)
         self.sidebarimg.blit(location,(2,60))
                         
     def loadTiles(self):
@@ -561,16 +658,13 @@ class HexagonExample:
         self.tile = pygame.image.load("./hextile.png").convert()
         self.tile.set_colorkey((0x80, 0x00, 0x80), RLEACCEL)                
 
-        self.up_cursor = pygame.image.load("./hexcursor.png").convert()
-        self.up_cursor.set_colorkey((0x80, 0x00, 0x80), RLEACCEL)                        
-        self.cursorPos = self.up_cursor.get_rect()
-        self.cursor = self.up_cursor
+        self.cursor = pygame.image.load("./hexcursor.png").convert()
+        self.cursor.set_colorkey((0x80, 0x00, 0x80), RLEACCEL)                        
+        self.cursorPos = self.cursor.get_rect()
         
-        self.down_cursor = pygame.image.load("./hexcursor_down.png").convert()
-        self.down_cursor.set_colorkey((0x80, 0x00, 0x80), RLEACCEL)                        
-        assert(self.down_cursor.get_rect()==self.up_cursor.get_rect())
 
     def init(self):
+        pygame.init()    
         
         self.game = AntWarsGame()
 
@@ -611,18 +705,27 @@ class HexagonExample:
         elif event_type == MOUSEBUTTONUP:
             mapX,mapY = mouse_up_location = self.pixelToHexMap(px, py)
             self.game.handleClick(mapX, mapY)
-            
-            self.cursor = self.up_cursor
-    
+                
     def handle_sidebar_mouse_event(self, px, py, event_type):
         if event_type == MOUSEMOTION:
             self.setCursor(px, py)
             
         elif event_type==MOUSEBUTTONUP:
             self.update_sidebar()
+
+    def update_display(self):
+        # DRAWING             
+        self.update_sidebar()
+        self.draw_changed_hexes()
+        self.screen.blit(self.mapimg, (0, 0))
+        if self.cursor_visible:
+            self.screen.blit(self.cursor,self.cursorPos)                        
+        self.screen.blit(self.sidebarimg, (self.sidebar_x_location, 0))
+
+        pygame.display.flip()
+
     
     def mainLoop(self):    
-        pygame.init()    
 
         self.init()
 
@@ -632,7 +735,7 @@ class HexagonExample:
 
             self.game.play_computer_turn()
 
-            clock.tick(30)
+            clock.tick(self.game.frame_rate)
 
             for event in pygame.event.get():
                 if event.type == QUIT:
@@ -647,18 +750,10 @@ class HexagonExample:
                     else:
                         self.handle_sidebar_mouse_event(px, py, event.type)                    
             
-            self.update_sidebar()
-            
             self.game.check_victory()
-            # DRAWING             
-            self.draw_changed_hexes()
-            self.screen.blit(self.mapimg, (0, 0))
-            if self.cursor_visible:
-                self.screen.blit(self.cursor,self.cursorPos)                        
-            self.screen.blit(self.sidebarimg, (self.sidebar_x_location, 0))
-
-            pygame.display.flip()
-
+            self.update_display()
+            
+            
         print "Player %s WINS!" % self.game.winner.id
             
 def main():
