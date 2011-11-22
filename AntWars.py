@@ -50,7 +50,17 @@ player_two = PLAYER_CLASSES["C2" in sys.argv[1:] or "C" in sys.argv[1:]](2, colo
 player_one.other_player = player_two
 player_two.other_player = player_one
 
-args = [a for a in sys.argv[1:] if not a in ["C","C1","C2"]]
+fr = [int(a[1:]) for a in sys.argv[1:] if a.startswith("F")]
+if fr:
+    FRAME_RATE = fr[0]
+elif player_one.is_computer and player_two.is_computer:
+    FRAME_RATE = 30
+else:
+    FRAME_RATE = 5
+
+quiet = "Q" in sys.argv[1:]
+
+args = [a for a in sys.argv[1:] if not a in ["C","C1","C2", "Q"] and not a.startswith("F")]
 MAP_WIDTH = 16
 MAP_HEIGHT = 15
 if args:
@@ -85,62 +95,285 @@ SIDEBAR_PIXEL_MIN_HEIGHT = 80
 class GameLogger(object):
     # ---- Logging stuff....    
     def __init__(self, game):
-        # Logging s
         self.game = game
-        self.click_num = 0
-        self.click_player = player_one
-        self.click_state = "CHOOSING"
-        self.click_actions = []
-        self.transition_actions = []
-        self.log_start_time = time.time()
-        
-    def logClickAction(self, action):
-        self.click_actions.append(action)
 
-    def logTransitionAction(self, action):
-        self.transition_actions.append(action)
+class GameState(object):
+    def __init__(self, name, game, is_first=False, change_player=True):
+        self.game = game
+        self.name = name
+        self.is_first = is_first
         
-    def logClick(self, hex):
-        self.click_num += 1
-        click_num = self.click_num
-        start_state = self.click_state
-        start_pid = self.click_player.id
-        curr_state = self.game.state
-        curr_pid = self.game.current_player.id
+        self.game.log("BEGIN STATE %s" % self.name)
+        if is_first:
+            self.game.log("************************ FIRST %s STATE *******************************" % self.name)
+            self.game.current_player = player_one
+            self.game.log("SET PLAYER to %s" % self.game.current_player.id)
+        elif change_player:
+            self.game.current_player = self.game.current_player.other_player
+            self.game.log("**** CHANGE PLAYER TO %s ***" % self.game.current_player.id)
+
+
+    def handle_map_click(self, hex):
+        self.log("MAP CLICK", hex)
+        return self
+        
+    def handle_sidebar_click(self):
+        self.log("SIDEBAR CLICK")
+        return self
+        
+    def play_computer_turn(self):
+        return self
+    
+    def check_victory(self):
+        pass
+        
+    def __str__(self):
+        return self.name
+    
+class ChoosingGameState(GameState):
+    def __init__(self, game, is_first=False, change_player=True):
+        GameState.__init__(self, "CHOOSING", game, is_first, change_player)
+
+    def handle_map_click(self, hex):
+        if hex.owner!=none_player:
+            self.game.log("ALREADY OWNED", hex)
+            return self
+            
+        hex.owner = self.game.current_player
+        hex.count = 1
+        self.game.changed_hexes.append(hex)        
+        self.game.log("SET NEW OWNER %s" % self.game.current_player.id, hex)
+
+        if not self.game.get_hexes_owned_by(none_player):
+            return PlacingGameState(self.game, is_first=True)
+        else:
+            return ChoosingGameState(self.game)
+    
+    def play_computer_turn(self):
+        avail_hexes = self.game.get_hexes_owned_by(none_player)
+        my_hexes = self.game.get_hexes_owned_by(self.game.current_player)
+        if len(my_hexes)<4 or len(avail_hexes)==1:
+            target_hexes = avail_hexes
+        else:
+            their_hexes = self.game.get_hexes_owned_by(self.game.current_player.other_player)
+    
+            target_hexes = []
+            for h in avail_hexes:
+                adj = self.game.get_adjacent_hexes(h)
+                n = len([a for a in adj if a in my_hexes])
+                target_hexes.append([n, h])
+    
+            target_hexes.sort()
+            target_hexes.reverse()
+            target_hexes = [h for n,h in target_hexes]
+            num_targets = len(target_hexes)
+            quarter_targets = num_targets/4
+            target_hexes = target_hexes[:1+quarter_targets]
+        
+        hex = random.choice(target_hexes)
+        return self.handle_map_click(hex)
+
+class PlacingGameState(GameState):
+    def __init__(self, game, is_first=False, change_player=True):
+        if is_first:
+            player_one.pool = player_two.pool = INITIAL_POOL_SIZE
+            player_one.batch_size = player_two.batch_size = INITIAL_PLACING_BATCH_SIZE
+        GameState.__init__(self, "PLACING", game, is_first, change_player)
+        
+    def handle_map_click(self, hex):
+        if hex.owner!=self.game.current_player:
+            self.game.log("OTHER PLAYER OWNED", hex)
+            return self
+
+        self.game.load_hex(hex)        
+
+        if player_one.pool==0 and player_two.pool==0:
+            return ReinforcingGameState(self.game, is_first=True)
+        elif self.game.current_player.other_player.pool!=0:
+            return PlacingGameState(self.game)
+        else:
+            return self
+
+    def play_computer_turn(self):
+        avail_hexes = self.game.get_hexes_owned_by(self.game.current_player)
+        safe_hexes = self.game.get_safe_hexes(avail_hexes)
+        avail_hexes = [h for h in avail_hexes if not h in safe_hexes]
+        hex = random.choice(avail_hexes)
+        return self.handle_map_click(hex)
+
+                
+class ReinforcingGameState(GameState):
+    def __init__(self, game, is_first=False, change_player=True):
+        new_turn = False
+        if is_first:
+            game.turn = 1
+            player_one.batch_size = player_two.batch_size = INITIAL_PLAYING_BATCH_SIZE
+            new_turn = True
+        elif game.current_player == player_one:
+            game.turn += 1                    
+            new_turn = True
+        
+        GameState.__init__(self, "REINFORCING", game, change_player)
+        if new_turn:
+            self.game.log("*********** START TURN %s ****************" % self.game.turn)
+
+        hexes = self.game.get_hexes_owned_by(self.game.current_player)
+        safe_hexes = self.game.get_safe_hexes(hexes)
+        n = max(MIN_PER_TURN_BATCH_SIZE, len(hexes)+(len(safe_hexes)*2))
+        self.game.current_player.pool = n
+        self.game.log("Add %s TO POOL, now: %s" % (n, self.game.current_player.pool))
+
+    def handle_map_click(self, hex):
+        if hex.owner!=self.game.current_player:
+            self.game.log("OTHER PLAYER OWNED", hex)
+            return self
+
+        self.game.load_hex(hex)        
+
+        if not self.game.current_player.pool:            
+            self.game.log("NO MORE REINFORCEMENTS")
+            return AttackingGameState(self.game, change_player=False)
+        else:
+            return self # Reinforcing state continues until (a) no more in pool or (b) sidebar click
+
+
+    def handle_sidebar_click(self):
+        if not self.game.current_player.is_computer:
+            self.game.log("ENDING REINFORCING PHASE")
+            return AttackingGameState(self.game)
+        else:
+            return self
+
+    def play_computer_turn(self):
+        my_hexes = self.game.get_hexes_owned_by(self.game.current_player)
+        safe_hexes = self.game.get_safe_hexes(my_hexes)
+        reinforcing_hexes = [[h in safe_hexes, h.count, h] for h in my_hexes]
+        reinforcing_hexes.sort()
+        reinforcing_hexes = [h for s,c,h in reinforcing_hexes if self.game.load_hex_amount(h)]
+                    
+        if reinforcing_hexes:
+            hex = random.choice(reinforcing_hexes[:3])
+            return self.handle_map_click(hex)
+        else:
+            self.game.log("NO PLACE TO REINFORCE")
+            return AttackingGameState(self.game, change_player=False)
+
+    def check_victory(self):
+        if not self.game.get_hexes_owned_by(player_one):
+            self.game.winner = player_two
+            self.game.is_over = True
+            
+        elif not self.game.get_hexes_owned_by(player_two):
+            self.game.winner = player_one
+            self.game.is_over = True
+
+    def __str__(self):
+        return "%s  %3s" % (self.name, self.game.turn)
+        
+class AttackingGameState(GameState):
+    def __init__(self, game, is_first=False, change_player=True):
+        assert(not is_first)
+        game.num_attacks = NUM_ATTACKS_PER_TURN
+        GameState.__init__(self, "ATTACKING", game, is_first, change_player)
+
+    def handle_sidebar_click(self):
+        if not self.game.current_player.is_computer:
+            self.game.log("ENDING ATTACKING PHASE")
+            return ReinforcingGameState(self.game, change_player=True)
+        else:
+            return self
+            
+    def handle_map_click(self, hex):
+        if hex.owner==self.game.current_player:
+            self.game.log("NOT OTHER PLAYER OWNED", hex)
+            return self
+        target_points = hex.count
+        attack_points = self.game.get_attack_points(hex, actual_attack=True)
+        
+
+        if target_points>attack_points:
+            hex.count = target_points-attack_points
+            result = "Defender wins"
+        elif target_points==attack_points:            
+            hex.count = 1
+            result = "Defender ties"
+        else:
+            hex.count = attack_points-target_points
+            hex.owner = self.game.current_player
+            result = "Attacker wins"
+                
+        self.game.changed_hexes.append(hex)
+        self.game.log("%s -> %s, %s" % (attack_points, target_points, result), hex)
+        self.game.num_attacks -= 1            
+        self.game.log("%s ATTACKS LEFT" % self.game.num_attacks, hex)
+        
+        if self.game.num_attacks<=1:
+            return ReinforcingGameState(self.game, change_player=False)
+        else:
+            return self # Attacking state continues until (a) no more attacks or (b) sidebar click
+
+                
+    def play_computer_turn(self):
+        # Get opposing hexes...
+        my_hexes = self.game.get_hexes_owned_by(self.game.current_player)
+        target_hexes = []
+        their_hexes = self.game.get_hexes_owned_by(self.game.current_player.other_player)
+        
+        for h in their_hexes:
+            attack_points = self.game.get_attack_points(h)
+            if attack_points:
+                adjacent_hexes = self.game.get_adjacent_hexes(h)
+                surroundedness = len([a for a in adjacent_hexes if a in my_hexes])
+                defendedness = len([a for a in adjacent_hexes if a in their_hexes])
+                successfull = attack_points>h.count
+                target_hexes.append([successfull, surroundedness, 6-defendedness, attack_points, h])
+            
+        target_hexes.sort()
+        target_hexes.reverse()
+        if target_hexes:
+        
+            #target_hexes = target_hexes[:3]
+            #h = random.choice(target_hexes)
+            hex = target_hexes[0][-1]
+            return self.handle_map_click(hex)
+        else:
+            self.game.log("NO ATTACKS AVAILABLE")                
+            return ReinforcingGameState(self.game, change_player=False)
+
+    def __str__(self):
+        return "%s  %3s" % (self.name, self.game.turn)
+
+        
+class AntWarsGame(object):
+    def __init__(self):
+        self.log_start_time = time.time()
+        self.state = None
+        self.current_player = none_player
+        self.turn = 0
+        self.is_over = False
+        
+        self.state = ChoosingGameState(self, is_first=True)
+        
+        self.changed_hexes = []
+        self.init_hexes()
+
+    def log(self, action, hex=None):
+        if quiet:
+            return
+            
+        if self.state:
+            state = self.state.name
+        else:
+            state = None
+        pid = "P%s" % self.current_player.id
+        turn = "T%s" % self.turn
         if hex:
             xy = "(%s,%s)" % (hex.x, hex.y)
         else:
             xy = "-"
         elapsed = time.time()-self.log_start_time
-        click_actions = ", ".join(self.click_actions)
-        transition_actions = ", ".join(self.transition_actions)
-
-        print "[%(click_num)3s %(elapsed)7.2f] %(xy)7s : ACTION: %(start_state)s, P%(start_pid)s - %(click_actions)s" % locals(),
-        if transition_actions:
-            print "; TRANSITION: %(transition_actions)s" % locals(),
-        print        
+        print "[%(elapsed)7.2f] %(xy)7s : [ %(state)-12s %(turn)4s  %(pid)s] %(action)s" % locals()
         
-        self.click_actions = []
-        self.transition_actions = []
-        self.click_player = self.game.current_player
-        self.click_state = self.game.state
-
-
-class AntWarsGame(object):
-    def __init__(self):
-        self.state = "CHOOSING"
-        self.turn = 0
-        self.is_over = False
-        self.current_player = player_one
-        if player_one.is_computer and player_two.is_computer:
-            self.frame_rate = 60
-        else:
-            self.frame_rate = 10
-        
-        self.changed_hexes = []
-        self.init_hexes()
-        
-        self.logger = GameLogger(self)        
 
     def init_hexes(self):
         self.hexes = []
@@ -154,77 +387,27 @@ class AntWarsGame(object):
                 self.changed_hexes.append(h)
 
 
-    def handleMapClick(self, mapX, mapY):
-        if self.current_player.is_computer:
-            self.logger.logClickAction("COMPUTER PLAYER")
-            
-        elif mapX>=MAP_WIDTH or mapY>=MAP_HEIGHT:   
-            self.logger.logClickAction("OUT-OF-AREA")
-
-        elif self.state=='CHOOSING':
-            self.handleChoosingClick(mapX, mapY)
-                
-        elif self.state=='PLACING':
-            self.handlePlacingClick(mapX, mapY)
-
-        elif self.state=='REINFORCING':
-            self.handleReinforcingClick(mapX, mapY)
-        
-        elif self.state=='ATTACKING':
-            self.handleAttackingClick(mapX, mapY)
-        
-        else:
-            self.logger.logClickAction("UNKNOWN GAME STATE")
-        
-
-        self.logger.logClick(self.hexes[mapX][mapY])
-        
     def handleSidebarClick(self):
         if self.current_player.is_computer:
-            self.logger.logClickAction("COMPUTER PLAYER")
-    
-        elif self.state=='REINFORCING':
-            self.handleFinishReinforcingClick()
-        
-        elif self.state=='ATTACKING':
-            self.change_player()
-
+            self.log("IGNORE SIDEBAR CLICK - COMPUTER PLAYER")
         else:
-            self.logger.logClickAction("IGNORED")
+            self.state = self.state.handle_sidebar_click()
+
+    def handleMapClick(self, mapX, mapY):
+        if self.current_player.is_computer:
+            self.log("IGNORE MAP CLICK - COMPUTER PLAYER")
             
-        self.logger.logClick(None)
-
-    def handleChoosingClick(self, mapX, mapY):
-
-        h = self.hexes[mapX][mapY]
-        
-        if h.owner!=none_player:
-            self.logger.logClickAction("ALREADY OWNED")
-            return
-            
-        self.logger.logClickAction("NEW OWNER")
-
-                    
-        h.owner = self.current_player
-        h.count = 1
-        self.changed_hexes.append(h)
-        
-        num_not_owned = 0
-        for row in self.hexes:
-            for hex in row:
-                if hex.owner==none_player:
-                    num_not_owned += 1
-
-
-        if num_not_owned==0:
-            self.state = "PLACING"
-            self.current_player = self.current_player.other_player
-            player_one.pool = player_two.pool = INITIAL_POOL_SIZE
-            player_one.batch_size = player_two.batch_size = INITIAL_PLACING_BATCH_SIZE
-            self.logger.logTransitionAction("START PLACING")
+        elif mapX>=MAP_WIDTH or mapY>=MAP_HEIGHT:   
+            self.log("MAP OUT-OF-AREA %s, %s" % (mapX, mapY))
         else:
-            self.change_player()
-            
+            hex = self.hexes[mapX][mapY]
+            self.state.handle_map_click(hex)
+        
+
+    def play_computer_turn(self):
+        if self.current_player.is_computer:
+            self.state = self.state.play_computer_turn()
+
 
     def load_hex_amount(self, hex):
         n = max(0, min(self.current_player.pool, self.current_player.batch_size, 25, 99-hex.count))
@@ -238,32 +421,10 @@ class AntWarsGame(object):
         else:
             hex.count += n
             self.changed_hexes.append(hex)
-            self.logger.logClickAction("Bump Hex to %s" % hex.count)
+            self.log("Bump Hex to %s" % hex.count, hex)
             self.current_player.pool -= n
-            self.logger.logClickAction("Reduce pool to %s" % self.current_player.pool)
+            self.log("Reduce pool to %s" % self.current_player.pool, hex)
     
-    def handlePlacingClick(self, mapX, mapY):
-        hex = self.hexes[mapX][mapY]
-        if hex.owner!=self.current_player:
-            self.logger.logClickAction("OTHER PLAYER OWNED")
-            return
-
-        self.load_hex(hex)        
-
-        if player_one.pool==0 and player_two.pool==0:
-            self.state = "REINFORCING"
-            self.turn = 1
-            self.num_attacks = NUM_ATTACKS_PER_TURN
-            if player_one.is_computer and player_two.is_computer:
-                self.frame_rate = 40
-            else:
-                self.frame_rate = 10
-            self.current_player = self.current_player.other_player
-            player_one.batch_size = player_two.batch_size = INITIAL_PLAYING_BATCH_SIZE            
-            self.logger.logTransitionAction("START PLAYING")
-        else:
-            self.change_player()
-
     def get_attack_points(self, hex, actual_attack=False):
         attack_points = 0
         for h in self.get_adjacent_hexes(hex):
@@ -276,86 +437,7 @@ class AntWarsGame(object):
                 if actual_attack:
                     h.count -= n
                     self.changed_hexes.append(h)
-        return attack_points
-        
-    def handleReinforcingClick(self, mapX, mapY):        
-        hex = self.hexes[mapX][mapY]
-        if hex.owner!=self.current_player:
-            self.logger.logClickAction("NOT PLAYER OWNED")
-            return
-
-        target_points = hex.count
-        attack_points = self.get_attack_points(hex, actual_attack=True)
-        
-
-        if target_points>attack_points:
-            hex.count = target_points-attack_points
-            result = "Defender wins"
-        elif target_points==attack_points:            
-            hex.count = 1
-            result = "Defender ties"
-        else:
-            hex.count = attack_points-target_points
-            hex.owner = self.current_player
-            result = "Attacker wins"
-                
-        self.changed_hexes.append(hex)
-        self.logger.logClickAction("%s -> %s, %s" % (attack_points, target_points, result))
-        self.num_attacks -= 1            
-        if self.num_attacks<=1:
-            self.logger.logClickAction("USED ALL ATTACKS")
-            self.change_player()
-        else:
-            self.logger.logClickAction("%s ATTACKS LEFT" % self.num_attacks)
-
-    def handleFinishedReinforcingClick(self):
-        self.logger.logClickAction("REINFORCING DONE")
-        self.current_player.pool = 0
-        self.state = "ATTACKING"
-        self.logger.logClick(None)
-        
-
-    def handleReinforcingClick(self, mapX, mapY):
-        h = self.hexes[mapX][mapY]
-        self.load_hex(h)
-
-        if not self.current_player.pool:
-            self.logger.logClickAction("NO MORE REINFORCEMENTS")
-            self.current_player.pool = 0
-            self.state = "ATTACKING"
-            
-        self.logger.logClick(h)
-
-    def handleAttackingClick(self, mapX, mapY):        
-        hex = self.hexes[mapX][mapY]
-        if hex.owner==self.current_player:
-            self.logger.logClickAction("NOT OTHER PLAYER OWNED")
-            return
-
-        target_points = hex.count
-        attack_points = self.get_attack_points(hex, actual_attack=True)
-        
-
-        if target_points>attack_points:
-            hex.count = target_points-attack_points
-            result = "Defender wins"
-        elif target_points==attack_points:            
-            hex.count = 1
-            result = "Defender ties"
-        else:
-            hex.count = attack_points-target_points
-            hex.owner = self.current_player
-            result = "Attacker wins"
-                
-        self.changed_hexes.append(hex)
-        self.logger.logClickAction("%s -> %s, %s" % (attack_points, target_points, result))
-        self.num_attacks -= 1            
-        if self.num_attacks<=1:
-            self.logger.logClickAction("USED ALL ATTACKS")
-            self.change_player()
-        else:
-            self.logger.logClickAction("%s ATTACKS LEFT" % self.num_attacks)
-                
+        return attack_points                        
 
     def get_safe_hexes(self, hexes):
         safe_hexes = []
@@ -370,50 +452,9 @@ class AntWarsGame(object):
                 return False
         return True
         
-    def change_player(self):  
-        next_player = self.current_player.other_player
 
-        if self.can_change_to_player(next_player):
-            self.current_player = next_player
-            self.logger.logTransitionAction("CHANGE PLAYER to %s" % self.current_player.id)
-            if self.state in ("REINFORCING", "ATTACKING"):
-                self.state = 'REINFORCING'
-                self.num_attacks = NUM_ATTACKS_PER_TURN
-                hexes = self.get_hexes_owned_by(self.current_player)
-                safe_hexes = self.get_safe_hexes(hexes)
-                n = max(MIN_PER_TURN_BATCH_SIZE, len(hexes)+(len(safe_hexes)*2))
-                self.current_player.pool = n
-                self.logger.logTransitionAction("Add %s TO POOL" % n)
-                if self.current_player == player_one:
-                    self.turn += 1                    
-                    self.logger.logTransitionAction("START TURN %s" % self.turn)
-        else:
-            self.logger.logTransitionAction("CAN'T CHANGE PLAYER to %s" % self.current_player.id)
-        
-
-    def can_change_to_player(self, next_player):
-        if self.current_player==next_player:
-            return False
-            
-        if self.state=='CHOOSING':
-            return True
-
-        if self.state=='PLACING':
-            return next_player.pool>0
-        
-        return True
-        
     def check_victory(self):
-        if not self.state in ("REINFORCING", "ATTACKING"):
-            return 
-        
-        elif not self.get_hexes_owned_by(player_one):
-            self.winner = player_two
-            self.is_over = True
-            
-        elif not self.get_hexes_owned_by(player_two):
-            self.winner = player_one
-            self.is_over = True
+        self.state.check_victory()
 
     def get_adjacent_hexes(self, hex):
         x, y = hex.x, hex.y
@@ -436,97 +477,6 @@ class AntWarsGame(object):
                     hexes.append(h)
         return hexes
         
-    def play_computer_turn(self):
-        if self.current_player.is_computer:
-            if self.state=='CHOOSING':
-                self.play_computer_choosing()
-            elif self.state=='PLACING':
-                self.play_computer_placing()
-            elif self.state=='REINFORCING':
-                self.play_computer_reinforcing()
-            elif self.state=='ATTACKING':
-                self.play_computer_attacking()
-            else:
-                raise ValueError, "Unknown game state: %s" % self.state
-
-    
-    def play_computer_choosing(self):
-        avail_hexes = self.get_hexes_owned_by(none_player)
-        my_hexes = self.get_hexes_owned_by(self.current_player)
-        if len(my_hexes)<4 or len(avail_hexes)==1:
-            target_hexes = avail_hexes
-        else:
-            their_hexes = self.get_hexes_owned_by(self.current_player.other_player)
-    
-            target_hexes = []
-            for h in avail_hexes:
-                adj = self.get_adjacent_hexes(h)
-                n = len([a for a in adj if a in my_hexes])
-                target_hexes.append([n, h])
-    
-            target_hexes.sort()
-            target_hexes.reverse()
-            target_hexes = [h for n,h in target_hexes]
-            num_targets = len(target_hexes)
-            quarter_targets = num_targets/4
-            target_hexes = target_hexes[:1+quarter_targets]
-        
-        h = random.choice(target_hexes)
-        self.handleChoosingClick(h.x,h.y)                
-        self.logger.logClick(h)
-
-    def play_computer_placing(self):
-        avail_hexes = self.get_hexes_owned_by(self.current_player)
-        safe_hexes = self.get_safe_hexes(avail_hexes)
-        avail_hexes = [h for h in avail_hexes if not h in safe_hexes]
-        h = random.choice(avail_hexes)
-        self.handlePlacingClick(h.x,h.y)                
-        self.logger.logClick(h)
-
-    def play_computer_reinforcing(self):
-        my_hexes = self.get_hexes_owned_by(self.current_player)
-        safe_hexes = self.get_safe_hexes(my_hexes)
-        reinforcing_hexes = [[h in safe_hexes, h.count, h] for h in my_hexes]
-        reinforcing_hexes.sort()
-        reinforcing_hexes = [h for s,c,h in reinforcing_hexes if self.load_hex_amount(h)]
-                    
-        if reinforcing_hexes:
-            h = random.choice(reinforcing_hexes[:3])
-            self.handleReinforcingClick(h.x, h.y)
-        else:
-            self.logger.logClickAction("NO PLACE TO REINFORCE")
-            self.handleFinishedReinforcingClick()
-    
-                
-    def play_computer_attacking(self):
-        # Get opposing hexes...
-        my_hexes = self.get_hexes_owned_by(self.current_player)
-        target_hexes = []
-        their_hexes = self.get_hexes_owned_by(self.current_player.other_player)
-        
-        for h in their_hexes:
-            attack_points = self.get_attack_points(h)
-            if attack_points:
-                adjacent_hexes = self.get_adjacent_hexes(h)
-                surroundedness = len([a for a in adjacent_hexes if a in my_hexes])
-                defendedness = len([a for a in adjacent_hexes if a in their_hexes])
-                successfull = attack_points>h.count
-                target_hexes.append([successfull, surroundedness, 6-defendedness, attack_points, h])
-            
-        target_hexes.sort()
-        target_hexes.reverse()
-        if target_hexes:
-        
-            #target_hexes = target_hexes[:3]
-            #h = random.choice(target_hexes)
-            h = target_hexes[0][-1]
-            self.handleAttackingClick(h.x, h.y)
-        else:
-            self.logger.logClickAction("NO ATTACKS AVAILABLE")                
-            self.change_player()
-            
-        self.logger.logClick(h)
-            
 
 # This is the modification tables for the square grid.
 
@@ -639,7 +589,7 @@ class HexagonExample:
             hexMapX=gridX+gridEvenRows[gridPixelY][gridPixelX][0]
             hexMapY=gridY+gridEvenRows[gridPixelY][gridPixelX][1]
 
-        print ox, x, gridX, gridPixelX, hexMapX, ':', oy, y, gridY, gridPixelY, hexMapY;sys.stdout.flush()
+        #print ox, x, gridX, gridPixelX, hexMapX, ':', oy, y, gridY, gridPixelY, hexMapY;sys.stdout.flush()
         return (hexMapX,hexMapY)
 
     def hexMapToPixel(self,mapX,mapY):
@@ -709,10 +659,7 @@ class HexagonExample:
         self.sidebarimg.fill((234,234,234))
 
         # game_state
-        if self.game.state in ("ATTACKING","REINFORCING"):
-            state_str = "%s  %3s" % (self.game.state, self.game.turn)
-        else:
-            state_str = self.game.state
+        state_str = str(self.game.state)
         location = self.fnt.render(state_str, 0, (0,0,0))
         self.sidebarimg.blit(location,(2,2))
 
@@ -814,7 +761,7 @@ class HexagonExample:
 
             self.game.play_computer_turn()
 
-            clock.tick(self.game.frame_rate)
+            clock.tick(FRAME_RATE)
 
             for event in pygame.event.get():
                 if event.type == QUIT:
