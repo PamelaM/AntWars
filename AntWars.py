@@ -12,10 +12,16 @@ from pgu import gui
 # Add Menus
 # Add ability to save the game
 # Add ability to choose size of ants-per-click
-# Refactor Player into Human Player and ComputerPlayer classes
 # Parse options properly
+# Move more stuff from the game class into the base GameState class
 # High Scores
 # Network play
+# Add Help
+# Improve sidebar with:
+#   "done" buttons
+#   better looking fonts
+#   cleaner layout
+# Add Preferences
 
 class Player(object):
     def __init__(self, id, is_computer, color):
@@ -401,7 +407,7 @@ class AntWarsGame(object):
             self.log("MAP OUT-OF-AREA %s, %s" % (mapX, mapY))
         else:
             hex = self.hexes[mapX][mapY]
-            self.state.handle_map_click(hex)
+            self.state = self.state.handle_map_click(hex)
         
 
     def play_computer_turn(self):

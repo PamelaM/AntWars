@@ -1,3 +1,28 @@
 This is a toy game based on a game that my son and I liked called 'AntWars'
 
 It's mostly a learning project.
+
+
+-----------
+To Play:
+-----------
+
+Run from the command line:
+$ python AntWars.py  H  W   [C1] [C2] [F#] [Q]
+    H = Height of map in hexes
+    W = Width of map in hexes
+    C1  = Player 1 is a computer
+    C2  = Player 2 is a computer
+    F#  = Frame Rate - Max # frames/second
+    Q   = Quiet mode - don't print lots of tracing information.
+    
+Demo mode is:
+    $ python AntWars.py 8 8 C1 C2 F10 Q
+        - 8x8 map
+        - Computer v Computer
+        - 10 frames/second
+        - No distractions
+    
+Debug mode is:
+    $ python AntWars.py 6 6 C1 C2 F60
+    
