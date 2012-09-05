@@ -1,4 +1,5 @@
 #/usr/bin/env python
+from __future__ import print_function
 import sys
 import os
 import math
@@ -6,13 +7,14 @@ import random
 import time
 import pygame
 from pygame.locals import *
-from pgu import gui
+#from pgu import gui
 
 # TODOS:
 # Add Menus
 # Add ability to save the game
 # Add ability to choose size of ants-per-click
-# Parse options properly
+# Add ability to terminate phase early...
+# Parse options properly (OptionsParse or whatever)
 # Move more stuff from the game class into the base GameState class
 # High Scores
 # Network play
@@ -70,7 +72,7 @@ args = [a for a in sys.argv[1:] if not a in ["C","C1","C2", "Q"] and not a.start
 MAP_WIDTH = 16
 MAP_HEIGHT = 15
 if args:
-    MAP_WIDTH, MAP_HEIGHT = map(int, args)
+    MAP_WIDTH, MAP_HEIGHT = list(map(int, args))
 
 INITIAL_POOL_SIZE =  (MAP_WIDTH*MAP_HEIGHT)+MAP_WIDTH
 INITIAL_PLACING_BATCH_SIZE = 2
@@ -378,7 +380,7 @@ class AntWarsGame(object):
         else:
             xy = "-"
         elapsed = time.time()-self.log_start_time
-        print "[%(elapsed)7.2f] %(xy)7s : [ %(state)-12s %(turn)4s  %(pid)s] %(action)s" % locals()
+        print("[%(elapsed)7.2f] %(xy)7s : [ %(state)-12s %(turn)4s  %(pid)s] %(action)s" % locals())
         
 
     def init_hexes(self):
@@ -595,7 +597,7 @@ class HexagonExample:
             hexMapX=gridX+gridEvenRows[gridPixelY][gridPixelX][0]
             hexMapY=gridY+gridEvenRows[gridPixelY][gridPixelX][1]
 
-        #print ox, x, gridX, gridPixelX, hexMapX, ':', oy, y, gridY, gridPixelY, hexMapY;sys.stdout.flush()
+        #print(ox, x, gridX, gridPixelX, hexMapX, ':', oy, y, gridY, gridPixelY, hexMapY);sys.stdout.flush()
         return (hexMapX,hexMapY)
 
     def hexMapToPixel(self,mapX,mapY):
@@ -786,7 +788,7 @@ class HexagonExample:
             self.update_display()
             
             
-        print "Player %s WINS!" % self.game.winner.id
+        print("Player %s WINS!" % self.game.winner.id)
             
 def main():
     g = HexagonExample()
